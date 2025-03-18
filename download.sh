@@ -1,0 +1,6 @@
+# modelscope download --model 'AI-ModelScope/llava-v1.6-vicuna-7b' --local_dir './models/llava-v1.6-vicuna-7b'
+# modelscope download --model 'AI-ModelScope/clip-vit-large-patch14-336' --local_dir './models/clip-vit-large-patch14-336'
+# modelscope download --model 'huangjianuo/llava-v1.5-7b' --local_dir './models/llava-v1.5-7b'
+# modelscope download --model 'AI-ModelScope/clip-vit-large-patch14' --local_dir './models/clip-vit-large-patch14'
+# modelscope download --model 'LLM-Research/idefics2-8b' --local_dir './models/idefics2-8b'
+modelscope download --model 'AI-ModelScope/llava-v1.6-mistral-7b' --local_dir './models/llava-v1.6-mistral-7b'
