@@ -8,7 +8,7 @@ import matplotlib as mpl
 # Dictionary mapping vision encoder size to models
 dict_encoder = {
     0.1: ["TinyGPT-V"],
-    0.3: ["llava-phi2", "MiniGemini", "MoE-LLaVA"],
+    0.3: ["llava-phi2", "MiniGemini", "MoE-LLaVA","llava-v1.5-7b","llava-v1.5-vicuna-7b","llava-v1.6-mistral-7b","llava-v1.6-vicuna-7b"],
     0.4: [
         "TinyLLaVA",
         "Deepseek-VL-7B",
@@ -18,6 +18,7 @@ dict_encoder = {
         "bunny-phi2-eva",
         "bunny-stablelm2-eva",
         "bunny-stablelm2-siglip",
+        "idefics2",
     ],
     0.6: ["qwen2-VL-2B-Instruct", "qwen2-VL-7B-Instruct"],
     0.7: ["cobra"]
@@ -45,6 +46,14 @@ dict_llm = {
         "qwen2-VL-2B-Instruct",
         "qwen2-VL-7B-Instruct",
     ],
+    "mistral":[
+        "idefics2",
+        "llava-v1.6-mistral-7b",
+    ],
+    "vicuna":[
+        "llava-v1.5-vicuna-7b",
+        "llava-v1.6-vicuna-7b",
+    ]
 }
 
 def load_attention_data(csv_file):
@@ -117,7 +126,8 @@ def add_model_labels_to_plot(ax, x_data, y_data, model_name, color, offset_idx=N
 
 def plot_by_encoder_size(df):
     """
-    Plot attention values by vision encoder size with all token types on the same plot
+    Plot attention values by vision encoder size with separate plots for each token type
+    to ensure all models are displayed properly.
     
     Args:
         df: DataFrame with attention data
@@ -125,171 +135,277 @@ def plot_by_encoder_size(df):
     # Define token types and their visualization styles
     token_types = ['img_attention', 'inst_attention', 'sys_attention', 'out_attention']
     token_names = ['Image', 'Instruction', 'System', 'Output']
-    token_colors = ['green', 'blue', 'red', 'purple']
-    token_markers = ['o', '^', 's', 'D']  # circle, triangle, square, diamond
     
-    # Set up figure with a modern style
-    plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(14, 10))
+    # Get all available models from the dataframe
+    all_available_models = sorted(df['model'].unique())
+    print(f"Found {len(all_available_models)} models with data: {', '.join(all_available_models)}")
     
-    # Define line styles for different encoder sizes
-    linestyles = ['-', '--', '-.', ':', (0, (3, 1, 1, 1))]
-    
-    # Get sorted list of encoder sizes with valid data
-    valid_encoder_sizes = []
+    # Map each model to its encoder size
+    model_to_encoder = {}
     for encoder_size, models in dict_encoder.items():
-        valid_models = get_models_with_data(df, models)
-        if valid_models:
-            valid_encoder_sizes.append(encoder_size)
-    valid_encoder_sizes.sort()
+        for model in models:
+            model_to_encoder[model] = encoder_size
     
-    # Create a colormap for encoder sizes
-    encoder_cmap = plt.cm.viridis(np.linspace(0, 0.9, len(valid_encoder_sizes)))
-    encoder_colors = {size: encoder_cmap[i] for i, size in enumerate(valid_encoder_sizes)}
+    # Group models by type to assign consistent colors
+    model_groups = {
+        'bunny': [m for m in all_available_models if 'bunny' in m],
+        'llava': [m for m in all_available_models if 'llava' in m],
+        'qwen': [m for m in all_available_models if 'qwen' in m],
+        'tiny': [m for m in all_available_models if 'Tiny' in m],
+        'other': [m for m in all_available_models if not any(x in m for x in ['bunny', 'llava', 'qwen', 'Tiny'])]
+    }
     
-    # Store handles for legend
-    legend_handles = []
+    # Create color mapping for model groups
+    group_colors = {
+        'bunny': plt.cm.Reds(np.linspace(0.3, 0.9, len(model_groups['bunny']) or 1)),
+        'llava': plt.cm.Blues(np.linspace(0.3, 0.9, len(model_groups['llava']) or 1)),
+        'qwen': plt.cm.Greens(np.linspace(0.3, 0.9, len(model_groups['qwen']) or 1)),
+        'tiny': plt.cm.Purples(np.linspace(0.3, 0.9, len(model_groups['tiny']) or 1)),
+        'other': plt.cm.Greys(np.linspace(0.3, 0.9, len(model_groups['other']) or 1))
+    }
     
-    # First, plot by encoder size and token type
-    for i, encoder_size in enumerate(valid_encoder_sizes):
-        models = dict_encoder[encoder_size]
-        valid_models = get_models_with_data(df, models)
+    # Assign colors to each model
+    model_colors = {}
+    for group, models in model_groups.items():
+        for i, model in enumerate(models):
+            model_colors[model] = group_colors[group][min(i, len(group_colors[group])-1)]
+    
+    # Define a wide variety of line styles to distinguish models
+    base_linestyles = ['-', '--', '-.', ':']
+    markers = ['o', '^', 's', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x', 'd']
+    
+    # Create extended linestyles with varying dash patterns
+    extended_linestyles = base_linestyles.copy()
+    extended_linestyles.extend([(0, (3, 1, 1, 1)), (0, (5, 1)), (0, (3, 1, 1, 1, 1, 1))])
+    
+    # For each token type, create a separate plot
+    for token_idx, (token_type, token_name) in enumerate(zip(token_types, token_names)):
+        # Use log scale for Image token type
+        use_log_scale = token_type == 'img_attention'
         
-        if not valid_models:
-            continue
+        # Set up figure with a modern style
+        plt.style.use('seaborn-v0_8-whitegrid')
         
-        # For each token type, calculate and plot the data for this encoder size
-        for j, (token_type, token_name, token_color, token_marker) in enumerate(
-            zip(token_types, token_names, token_colors, token_markers)):
+        # For Image attention, create two plots - one with log scale and one with regular scale
+        plot_configs = [(False, '')] if not use_log_scale else [(True, '_log'), (False, '_linear')]
+        
+        for log_scale, suffix in plot_configs:
+            fig, ax = plt.subplots(figsize=(16, 12))
             
-            # Calculate average token values across models with this encoder size
-            encoder_data = []
-            model_names = []
+            # Keep track of legend entries
+            legend_handles = []
             
-            for model in valid_models:
+            # Track y-values for jittering
+            y_value_sets = {}
+            
+            # For each available model
+            for model_idx, model in enumerate(all_available_models):
+                # Get data for this model
                 model_df = df[df['model'] == model]
-                if not model_df.empty:
-                    # Create list of layer values, filling missing layers with NaN
-                    max_layer = model_df['layer'].max()
-                    layer_values = []
+                
+                # Skip if no data
+                if model_df.empty:
+                    continue
                     
-                    for layer in range(1, max_layer + 1):
-                        layer_df = model_df[model_df['layer'] == layer]
-                        if not layer_df.empty and token_type in layer_df.columns and not layer_df[token_type].isna().all():
-                            layer_values.append(layer_df[token_type].iloc[0])
-                        else:
-                            layer_values.append(np.nan)
+                # Get encoder size for this model (if known)
+                encoder_size = model_to_encoder.get(model, 0.0)  # Default to 0.0 if unknown
+                
+                # Choose marker based on model index
+                marker = markers[model_idx % len(markers)]
+                
+                # Choose color based on model group
+                color = model_colors.get(model, (0.5, 0.5, 0.5, 1.0))  # Default gray if not found
+                
+                # Choose line style based on combination of encoder size and model index
+                linestyle_idx = (hash(model) % len(extended_linestyles))
+                linestyle = extended_linestyles[linestyle_idx]
+                
+                # Extract layer values for this token type
+                max_layer = model_df['layer'].max()
+                layer_values = []
+                
+                for layer in range(1, max_layer + 1):
+                    layer_df = model_df[model_df['layer'] == layer]
+                    if not layer_df.empty and token_type in layer_df.columns and not pd.isna(layer_df[token_type].iloc[0]):
+                        layer_values.append(layer_df[token_type].iloc[0])
+                    else:
+                        layer_values.append(np.nan)
+                
+                # Skip if no valid data for this token type
+                if not any(not pd.isna(x) for x in layer_values):
+                    continue
+                
+                # Get non-NaN indices for jittering calculation
+                valid_indices = [i for i, x in enumerate(layer_values) if not pd.isna(x)]
+                
+                # For Image token type with small values, add small offsets to prevent complete overlap
+                if token_type == 'img_attention':
+                    # Group values by their magnitude for jittering
+                    for i in valid_indices:
+                        val = layer_values[i]
+                        # Create buckets for similar values
+                        bucket = round(val * 100) / 100
+                        if bucket not in y_value_sets:
+                            y_value_sets[bucket] = []
+                        y_value_sets[bucket].append((model, i))
+                
+                # Plot the data
+                x_values = list(range(1, len(layer_values) + 1))
+                
+                # Apply small jitter for image token type with close values
+                if token_type == 'img_attention':
+                    jittered_values = layer_values.copy()
+                    for i in valid_indices:
+                        val = layer_values[i]
+                        bucket = round(val * 100) / 100
+                        # Find position of this model in the bucket
+                        bucket_models = y_value_sets[bucket]
+                        position = next((idx for idx, (m, _) in enumerate(bucket_models) if m == model), 0)
+                        # Add proportional jitter based on position
+                        jitter = 0.002 * (position + 1) / (len(bucket_models) + 1)
+                        jittered_values[i] = val + jitter
                     
-                    encoder_data.append(layer_values)
-                    model_names.append(model)
-            
-            if encoder_data:
-                # Find the maximum length across all model data
-                max_len = max(len(data) for data in encoder_data)
-                
-                # Pad shorter arrays with NaN
-                encoder_data = [data + [np.nan] * (max_len - len(data)) for data in encoder_data]
-                
-                # Calculate mean, ignoring NaN values
-                mean_values = np.nanmean(encoder_data, axis=0)
-                
-                # Choose line style based on encoder size index
-                linestyle = linestyles[i % len(linestyles)]
-                
-                # Define x values for the plot
-                x_values = list(range(1, len(mean_values) + 1))
+                    # Use jittered values
+                    plot_values = jittered_values
+                else:
+                    plot_values = layer_values
                 
                 # Plot the line with markers
                 line = ax.plot(
                     x_values, 
-                    mean_values,
-                    label=f"{token_name} ({encoder_size}B)",
-                    color=token_color,
+                    plot_values,
+                    label=f"{model} ({encoder_size}B)",
+                    color=color,
                     linestyle=linestyle,
-                    linewidth=2.5,
-                    alpha=0.8,
-                    marker=token_marker,
-                    markersize=8,
-                    markevery=max(1, len(mean_values)//10),  # Place markers every ~10 points
+                    linewidth=1.8,
+                    alpha=0.9,
+                    marker=marker,
+                    markersize=5,
+                    markevery=max(1, len(plot_values)//8),
                     markeredgecolor='black',
-                    markeredgewidth=1.0,
-                    zorder=10-j  # Higher zorder for img to make it appear on top when overlapping
+                    markeredgewidth=0.5
                 )
                 
-                # Add model name labels on the line
-                # Only add labels if there are between 1 and 3 models for this encoder size
-                # to avoid too many labels
-                if 1 <= len(model_names) <= 3:
-                    # Use different positions for different token types to avoid overlap
-                    position_offset = j * 3  # Offset by token type index
-                    position = int(len(x_values) * 0.5 + position_offset) 
-                    
-                    # Add small label with model names
-                    model_label = ", ".join(model_names)
-                    add_model_labels_to_plot(
-                        ax, x_values, mean_values, model_label, token_color, 
-                        offset_idx=min(position, len(x_values)-1)
-                    )
-                
+                # Add to legend handles
                 legend_handles.append(line[0])
-    
-    # Enhance the plot aesthetics
-    ax.set_xlabel('Layer', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Attention Proportion', fontsize=14, fontweight='bold')
-    ax.set_title('Token Attention Distribution by Vision Encoder Size', fontsize=16, fontweight='bold')
-    
-    # Format y-axis as percentage
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: '{:.0%}'.format(y)))
-    
-    # Set y-axis limits to ensure all data is visible
-    ax.set_ylim(0, min(1.0, ax.get_ylim()[1] * 1.1))
-    
-    # Improve grid appearance
-    ax.grid(True, linestyle='--', alpha=0.7)
-    
-    # Add a light gray background for better contrast
-    ax.set_facecolor('#f8f8f8')
-    
-    # Customize the tick labels
-    ax.tick_params(axis='both', which='major', labelsize=12)
-    
-    # Create a sorted legend for better readability
-    by_label = dict(zip([h.get_label() for h in legend_handles], legend_handles))
-    
-    # Sort by token type first, then by encoder size
-    token_names_ordered = ['Image', 'Instruction', 'System', 'Output']
-    sorted_labels = []
-    for token in token_names_ordered:
-        token_labels = [label for label in by_label.keys() if label.startswith(token)]
-        token_labels.sort(key=lambda x: float(x.split('(')[1].replace('B)', '')))
-        sorted_labels.extend(token_labels)
-    
-    # Add the legend with sorted labels and adjusted position
-    legend_handles_sorted = [by_label[label] for label in sorted_labels]
-    ax.legend(
-        handles=legend_handles_sorted,
-        labels=sorted_labels,
-        fontsize=12,
-        frameon=True,
-        facecolor='white',
-        framealpha=0.9,
-        edgecolor='gray',
-        loc='center right',  # Move from 'upper right' to 'center right'
-        ncol=2,
-        borderaxespad=1.0,
-        title='Token Type (Encoder Size)',
-        title_fontsize=14
-    )
-    
-    # Add a light border around the plot
-    for spine in ax.spines.values():
-        spine.set_edgecolor('gray')
-        spine.set_linewidth(1.0)
-    
-    # Save figure with higher resolution
-    plt.tight_layout()
-    plt.savefig(os.path.join('analysis', 'token_attention_by_encoder_size.png'), dpi=300, bbox_inches='tight')
-    plt.close()
+                
+                # Add model label directly on the line at a staggered position
+                stagger_factor = model_idx % 5  # Stagger labels to avoid overlap
+                label_position = int(len(x_values) * (0.5 + 0.08 * stagger_factor))
+                label_position = min(label_position, len(x_values)-1)
+                
+                if label_position >= 0:
+                    # Determine text color based on background
+                    text_color = 'black' if np.mean(color[:3]) > 0.5 else 'white'
+                    
+                    # Add bbox for better visibility
+                    ax.annotate(
+                        model, 
+                        (x_values[label_position], plot_values[label_position]),
+                        fontsize=7, 
+                        color=text_color, 
+                        ha='center', 
+                        va='bottom',
+                        bbox=dict(
+                            boxstyle="round,pad=0.1", 
+                            fc=color, 
+                            ec="black", 
+                            alpha=0.9,
+                            linewidth=0.5
+                        ),
+                        zorder=100  # Ensure labels are on top
+                    )
+            
+            # Skip this plot if nothing was plotted
+            if not legend_handles:
+                plt.close(fig)
+                continue
+                
+            # Enhance plot aesthetics
+            ax.set_xlabel('Layer', fontsize=14, fontweight='bold')
+            ax.set_ylabel(f'{token_name} Attention Proportion', fontsize=14, fontweight='bold')
+            
+            scale_type = "Log Scale" if log_scale else "Linear Scale"
+            ax.set_title(f'{token_name} Attention Distribution by Model ({scale_type})', fontsize=16, fontweight='bold')
+            
+            # Format y-axis as percentage
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: '{:.1%}'.format(y)))
+            
+            # Set y-axis scale based on token type and configuration
+            if log_scale:
+                ax.set_yscale('log')
+                # Ensure the bottom limit is not zero for log scale
+                ax.set_ylim(0.001, min(1.0, ax.get_ylim()[1] * 1.1))
+            else:
+                min_y = 0
+                if token_type == 'img_attention':
+                    # For image token with linear scale, zoom in to see details
+                    max_visible = max([max([v for v in plot_values if not pd.isna(v)]) 
+                                     for plot_values in [layer_values] if any(not pd.isna(v) for v in plot_values)])
+                    # Add some headroom
+                    ax.set_ylim(min_y, min(0.15, max_visible * 1.5))
+                else:
+                    # For other token types, use dynamic scaling
+                    ax.set_ylim(min_y, min(1.0, ax.get_ylim()[1] * 1.1))
+                    
+            # Add minor gridlines for better readability
+            ax.grid(True, which='major', linestyle='-', alpha=0.6)
+            ax.grid(True, which='minor', linestyle=':', alpha=0.3)
+            
+            # Add a light gray background for better contrast
+            ax.set_facecolor('#f8f8f8')
+            
+            # Customize the tick labels
+            ax.tick_params(axis='both', which='major', labelsize=12)
+            
+            # Add the legend
+            # Sort by model group, then by encoder size
+            by_label = dict(zip([h.get_label() for h in legend_handles], legend_handles))
+            
+            # Helper function to get model group
+            def get_model_group(label):
+                model = label.split(' (')[0]
+                for group, models in model_groups.items():
+                    if model in models:
+                        return group
+                return 'other'
+            
+            # Sort labels by group, then by encoder size, then by model name
+            sorted_labels = sorted(by_label.keys(), 
+                                  key=lambda x: (
+                                      get_model_group(x),
+                                      float(x.split('(')[1].replace('B)', '')), 
+                                      x.split(' (')[0]
+                                  ))
+            
+            legend_handles_sorted = [by_label[label] for label in sorted_labels]
+            
+            # Add the legend with sorted labels in multiple columns for better readability
+            legend = ax.legend(
+                handles=legend_handles_sorted,
+                labels=sorted_labels,
+                fontsize=7,
+                frameon=True,
+                facecolor='white',
+                framealpha=0.9,
+                edgecolor='gray',
+                loc='upper center',  # Place at top
+                bbox_to_anchor=(0.5, -0.05),  # Position below the plot
+                ncol=min(4, len(legend_handles_sorted)),  # Multiple columns 
+                title='Model (Encoder Size)',
+                title_fontsize=9
+            )
+            
+            # Add a light border around the plot
+            for spine in ax.spines.values():
+                spine.set_edgecolor('gray')
+                spine.set_linewidth(1.0)
+            
+            # Save figure with higher resolution
+            plt.tight_layout()
+            plt.subplots_adjust(bottom=0.2)  # Make room for the legend
+            plt.savefig(os.path.join('images', f'{token_name.lower()}_by_model{suffix}.png'), dpi=300, bbox_inches='tight')
+            plt.close()
 
 def plot_by_llm_type(df):
     """
@@ -439,7 +555,7 @@ def plot_by_llm_type(df):
         
         # Save figure with higher resolution
         plt.tight_layout()
-        plt.savefig(os.path.join('analysis', f'attention_by_{llm_type}_llm.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join('images', f'attention_by_{llm_type}_llm.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
 def compare_same_llm_different_encoder(df):
@@ -608,13 +724,13 @@ def compare_same_llm_different_encoder(df):
             
             # Save figure with higher resolution
             plt.tight_layout()
-            plt.savefig(os.path.join('analysis', f'{token_name.lower()}_{llm_type}_by_encoder.png'), 
+            plt.savefig(os.path.join('images', f'{token_name.lower()}_{llm_type}_by_encoder.png'), 
                         dpi=300, bbox_inches='tight')
             plt.close()
 
 def main():
     # Load attention data
-    csv_file = 'analysis/attention_analysis.csv'
+    csv_file = 'attention_analysis.csv'
     
     try:
         attention_df = load_attention_data(csv_file)
@@ -623,8 +739,9 @@ def main():
         print("Make sure to run collect_attention.py first to generate the CSV file.")
         return
     
-    # Ensure the analysis directory exists
+    # Ensure the analysis and images directories exist
     os.makedirs('analysis', exist_ok=True)
+    os.makedirs('images', exist_ok=True)
     
     # Plot attention by vision encoder size
     print("Plotting attention by vision encoder size...")
@@ -638,7 +755,7 @@ def main():
     print("Comparing models with same LLM but different encoder sizes...")
     compare_same_llm_different_encoder(attention_df)
     
-    print("Plotting complete. Images saved to the 'analysis' directory.")
+    print("Plotting complete. Images saved to the 'images' directory.")
 
 if __name__ == "__main__":
     main() 
